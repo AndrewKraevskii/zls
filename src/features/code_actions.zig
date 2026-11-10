@@ -15,6 +15,7 @@ const Server = @import("../Server.zig");
 const Uri = @import("../Uri.zig");
 const diagnostics_gen = @import("diagnostics.zig");
 const tracy = @import("tracy");
+const log = std.log.scoped(.code_actions);
 
 /// To report server capabilities
 pub const supported_code_actions: []const types.CodeAction.Kind = &.{
@@ -152,19 +153,57 @@ pub const Builder = struct {
         const source_index = offsets.positionToIndex(tree.source, range.start, builder.offset_encoding);
 
         const ctx = try Analyser.getPositionContext(builder.arena, tree, source_index, true);
-        if (ctx != .string_literal) return;
 
-        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .string_literal, .multiline_string_literal_line }, tree) orelse return;
+        switch (ctx) {
+            .string_literal => {
+                var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .string_literal, .multiline_string_literal_line }, tree) orelse return;
 
-        // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
-        switch (tree.tokenTag(token_idx)) {
-            .string_literal, .multiline_string_literal_line => {},
-            else => token_idx -|= 1,
-        }
+                // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
+                switch (tree.tokenTag(token_idx)) {
+                    .string_literal, .multiline_string_literal_line => {},
+                    else => token_idx -|= 1,
+                }
 
-        switch (tree.tokenTag(token_idx)) {
-            .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx),
-            .string_literal => try generateStringLiteralCodeActions(builder, token_idx),
+                switch (tree.tokenTag(token_idx)) {
+                    .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx),
+                    .string_literal => try generateStringLiteralCodeActions(builder, token_idx),
+                    else => {},
+                }
+            },
+            .field_access => {
+                const selected_token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{.identifier}, tree) orelse return;
+
+                _ = std.mem.Allocator.Error;
+
+                var remove_start_token_idx = selected_token_idx - 1;
+                const remove_end_token_idx = remove_start_token_idx;
+                for (0..1000) |_| {
+                    if (tree.tokenTag(remove_start_token_idx - 1) != .identifier) break;
+                    remove_start_token_idx -= 1;
+                    if (tree.tokenTag(remove_start_token_idx - 1) != .period) break;
+                    remove_start_token_idx -= 1;
+                } else @panic("reached max iterations limit");
+
+                const remove_loc: Token.Loc = .{
+                    .start = offsets.tokenToLoc(tree, remove_start_token_idx).start,
+                    .end = offsets.tokenToLoc(tree, remove_end_token_idx).end,
+                };
+
+                const cut_part = offsets.locToSlice(tree.source, .{ .start = remove_loc.start, .end = offsets.tokenToLoc(tree, selected_token_idx).end });
+
+                var insert_part: std.ArrayList(u8) = .empty;
+                try insert_part.print(builder.arena, "const {s} = {s};\n", .{ tree.tokenSlice(selected_token_idx), cut_part });
+
+                try builder.actions.append(builder.arena, .{
+                    .title = "extract namespaces",
+                    .kind = .@"refactor.extract",
+                    .isPreferred = false,
+                    .edit = try builder.createWorkspaceEdit(&.{
+                        builder.createTextEditLoc(remove_loc, ""),
+                        builder.createTextEditLoc(.{ .start = 0, .end = 0 }, try insert_part.toOwnedSlice(builder.arena)),
+                    }),
+                });
+            },
             else => {},
         }
     }
