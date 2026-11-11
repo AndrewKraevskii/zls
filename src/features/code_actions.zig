@@ -249,7 +249,7 @@ fn generateExtractNamespaceCodeAction(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!builder.wantKind(.refactor)) return;
+    if (!builder.wantKind(.@"refactor.extract")) return;
     const tree = &builder.handle.tree;
 
     // this is only called if its field access which we dont support for now
