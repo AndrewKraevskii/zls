@@ -292,7 +292,7 @@ fn generateExtractNamespaceCodeAction(
             i,
             extraction_tags,
         ) orelse break);
-        i += 2;
+        i = first_token + 2;
 
         std.debug.assert(first_token + extraction_tags.len <= tree.tokens.len);
 
@@ -309,7 +309,7 @@ fn generateExtractNamespaceCodeAction(
         try edits.append(builder.arena, builder.createTextEditLoc(
             .{
                 .start = offsets.tokenToLoc(tree, first_token).start,
-                .end = offsets.tokenToLoc(tree, @intCast(first_token + extraction_tags.len - 1)).end,
+                .end = offsets.tokenToLoc(tree, @intCast(first_token + extraction_tags.len - 2)).end,
             },
             "",
         ));
