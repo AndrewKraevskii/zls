@@ -292,7 +292,15 @@ fn generateExtractNamespaceCodeAction(
             i,
             extraction_tags,
         ) orelse break);
-        i = first_token + 2;
+        i = first_token + extraction_tags.len;
+
+        // `first_token` should be first it access chain
+        if (std.mem.findScalar(Token.Tag, &.{
+            .identifier,
+            .period,
+        }, tree.tokenTag(first_token -| 1)) != null) {
+            continue;
+        }
 
         std.debug.assert(first_token + extraction_tags.len <= tree.tokens.len);
 
