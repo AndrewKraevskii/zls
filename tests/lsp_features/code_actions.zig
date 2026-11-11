@@ -976,6 +976,182 @@ test "convert string literal to multiline - invalid" {
     );
 }
 
+test "extract_namespace" {
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.bar.ba<cursor>s;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = bas;
+        \\}
+        \\const bas = std.bar.bas;
+    );
+
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.b<cursor>ar.bas;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = bar.bas;
+        \\}
+        \\const bar = std.bar;
+    );
+
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.Array<cursor>List(u8).Slice;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = ArrayList(u8).Slice;
+        \\}
+        \\const ArrayList = std.ArrayList;
+    );
+
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.bar<cursor>.bas;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = bar.bas;
+        \\}
+        \\const bar = std.bar;
+    );
+
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.bar.<cursor>bas;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = bas;
+        \\}
+        \\const bas = std.bar.bas;
+    );
+}
+
+test "extract_namespace multiple instances" {
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.bar.ba<cursor>s;
+        \\    _ = std.bar.bas;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = bas;
+        \\    _ = bas;
+        \\}
+        \\const bas = std.bar.bas;
+    );
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.bar.bas;
+        \\    _ = std.bar.ba<cursor>s;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = bas;
+        \\    _ = bas;
+        \\}
+        \\const bas = std.bar.bas;
+    );
+
+    try testExtractNamespace(
+        \\const foo = @import("foo");
+        \\test {
+        \\    _ = foo.bar.bas.foo.b<cursor>ar.bas.foo.bar.bas;
+        \\}
+    ,
+        \\const foo = @import("foo");
+        \\test {
+        \\    _ = bar.bas.foo.bar.bas;
+        \\}
+        \\const bar = foo.bar.bas.foo.bar;
+    );
+    try testExtractNamespace(
+        \\const foo = @import("foo");
+        \\test {
+        \\    _ = foo.b<cursor>ar.bas.foo.bar.bas.foo.bar.bas;
+        \\}
+    ,
+        \\const foo = @import("foo");
+        \\test {
+        \\    _ = bar.bas.foo.bar.bas.foo.bar.bas;
+        \\}
+        \\const bar = foo.bar;
+    );
+}
+
+test "extract_namespace string literals" {
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.@"str<cursor>uct";
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = @"struct";
+        \\}
+        \\const @"struct" = std.@"struct";
+    );
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.@<cursor>"struct";
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = @"struct";
+        \\}
+        \\const @"struct" = std.@"struct";
+    );
+}
+
+test "extract_namespace intentionaly not supported" {
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.ArrayList(u8).ba<cursor>s;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\test {
+        \\    _ = std.ArrayList(u8).bas;
+        \\}
+    );
+}
+
+test "extract_namespace to implement" {
+    try testExtractNamespace(
+        \\test {
+        \\    _ = @import("std").ba<cursor>s;
+        \\}
+    ,
+        \\test {
+        \\    _ = @import("std").bas;
+        \\}
+    );
+}
+
 fn testAutofix(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = true }); // diagnostics come from std.zig.AstGen
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = false }); // diagnostics come from calling zig ast-check
@@ -1016,6 +1192,10 @@ fn testOrganizeImportsNoAction(source: []const u8) !void {
 
 fn testConvertString(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .refactor });
+}
+
+fn testExtractNamespace(before: []const u8, after: []const u8) !void {
+    try testDiagnostic(before, after, .{ .filter_kind = .@"refactor.extract" });
 }
 
 fn testDiagnostic(
