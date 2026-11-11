@@ -4,17 +4,19 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const Token = std.zig.Token;
 
-const DocumentStore = @import("../DocumentStore.zig");
-const DocumentScope = @import("../DocumentScope.zig");
+const tracy = @import("tracy");
+const types = @import("lsp").types;
+
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const diff = @import("../diff.zig");
-const types = @import("lsp").types;
+const DocumentScope = @import("../DocumentScope.zig");
+const DocumentStore = @import("../DocumentStore.zig");
 const offsets = @import("../offsets.zig");
 const Server = @import("../Server.zig");
 const Uri = @import("../Uri.zig");
 const diagnostics_gen = @import("diagnostics.zig");
-const tracy = @import("tracy");
+
 const log = std.log.scoped(.code_actions);
 
 /// To report server capabilities
@@ -171,38 +173,9 @@ pub const Builder = struct {
                 }
             },
             .field_access => {
-                const selected_token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{.identifier}, tree) orelse return;
+                const token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{.identifier}, tree) orelse return;
 
-                _ = std.mem.Allocator.Error;
-
-                var remove_start_token_idx = selected_token_idx - 1;
-                const remove_end_token_idx = remove_start_token_idx;
-                for (0..1000) |_| {
-                    if (tree.tokenTag(remove_start_token_idx - 1) != .identifier) break;
-                    remove_start_token_idx -= 1;
-                    if (tree.tokenTag(remove_start_token_idx - 1) != .period) break;
-                    remove_start_token_idx -= 1;
-                } else @panic("reached max iterations limit");
-
-                const remove_loc: Token.Loc = .{
-                    .start = offsets.tokenToLoc(tree, remove_start_token_idx).start,
-                    .end = offsets.tokenToLoc(tree, remove_end_token_idx).end,
-                };
-
-                const cut_part = offsets.locToSlice(tree.source, .{ .start = remove_loc.start, .end = offsets.tokenToLoc(tree, selected_token_idx).end });
-
-                var insert_part: std.ArrayList(u8) = .empty;
-                try insert_part.print(builder.arena, "const {s} = {s};\n", .{ tree.tokenSlice(selected_token_idx), cut_part });
-
-                try builder.actions.append(builder.arena, .{
-                    .title = "extract namespaces",
-                    .kind = .@"refactor.extract",
-                    .isPreferred = false,
-                    .edit = try builder.createWorkspaceEdit(&.{
-                        builder.createTextEditLoc(remove_loc, ""),
-                        builder.createTextEditLoc(.{ .start = 0, .end = 0 }, try insert_part.toOwnedSlice(builder.arena)),
-                    }),
-                });
+                try generateExtractNamespaceCodeAction(builder, token_idx);
             },
             else => {},
         }
@@ -266,6 +239,88 @@ fn generateStringLiteralCodeActions(
         .kind = .refactor,
         .isPreferred = false,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, result.items)}),
+    });
+}
+
+fn generateExtractNamespaceCodeAction(
+    builder: *Builder,
+    selected_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!builder.wantKind(.refactor)) return;
+    const tree = &builder.handle.tree;
+
+    // this is only called if its field access which we dont support for now
+    std.debug.assert(.identifier == tree.tokenTag(selected_token));
+    std.debug.assert(.period == tree.tokenTag(selected_token - 1));
+
+    // const extraction_token_last = selected_token;
+    const extraction_token_first: Ast.TokenIndex = if (std.mem.findLastNone(Token.Tag, tree.tokens.items(.tag)[0 .. selected_token - 1], &.{ .period, .identifier })) |token_before_first_identifier|
+        @intCast(token_before_first_identifier + 1)
+    else
+        0;
+
+    // this not supported for now. It would be situation similar to std.ArrayList(u32).Slice;
+    if (tree.tokenTag(extraction_token_first) != .identifier) return;
+
+    const insert_part = offsets.locToSlice(tree.source, .{
+        .start = offsets.tokenToLoc(tree, extraction_token_first).start,
+        // we don't want comma
+        .end = offsets.tokenToLoc(tree, selected_token).end,
+    });
+
+    const inserted_statement = try builder.arena.print("\nconst {s} = {s};", .{ tree.tokenSlice(selected_token), insert_part });
+
+    // for now i place it in the end of file because it is always safe to do. Placing it at the start might conflict with top level comments "//!"
+    const last_token_locaction = offsets.tokenToLoc(tree, @intCast(tree.tokens.len - 1));
+
+    const insert_location: offsets.Loc = .{
+        .start = last_token_locaction.end,
+        .end = last_token_locaction.end,
+    };
+
+    const extraction_tags = tree.tokens.items(.tag)[extraction_token_first .. selected_token + 1];
+    var edits: std.ArrayList(types.TextEdit) = .empty;
+
+    var i: usize = 0;
+    outer: while (i < tree.tokens.len) {
+        const first_token: Ast.TokenIndex = @intCast(std.mem.findPos(
+            Token.Tag,
+            tree.tokens.items(.tag),
+            i,
+            extraction_tags,
+        ) orelse break);
+        i += 2;
+
+        std.debug.assert(first_token + extraction_tags.len <= tree.tokens.len);
+
+        for (first_token.., extraction_token_first..selected_token + 1) |source_token_idx, token_idx| {
+            if (!std.mem.eql(
+                u8,
+                offsets.tokenToSlice(tree, @intCast(token_idx)),
+                offsets.tokenToSlice(tree, @intCast(source_token_idx)),
+            )) {
+                continue :outer;
+            }
+        }
+
+        try edits.append(builder.arena, builder.createTextEditLoc(
+            .{
+                .start = offsets.tokenToLoc(tree, first_token).start,
+                .end = offsets.tokenToLoc(tree, @intCast(first_token + extraction_tags.len - 1)).end,
+            },
+            "",
+        ));
+    }
+    try edits.append(builder.arena, builder.createTextEditLoc(insert_location, inserted_statement));
+
+    try builder.actions.append(builder.arena, .{
+        .title = "extract namespaces",
+        .kind = .@"refactor.extract",
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(try edits.toOwnedSlice(builder.arena)),
     });
 }
 
