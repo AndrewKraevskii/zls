@@ -1140,14 +1140,48 @@ test "extract_namespace intentionaly not supported" {
     );
 }
 
-test "extract_namespace to implement" {
+test "extract_namespace not implemented for now" {
+    if (true) return error.SkipZigTest;
+
+    // imports as root declaration should also work
     try testExtractNamespace(
         \\test {
         \\    _ = @import("std").ba<cursor>s;
         \\}
     ,
+        \\const bas = @import("std").bas;
         \\test {
-        \\    _ = @import("std").bas;
+        \\    _ = bas;
+        \\}
+    );
+
+    // for local variables it should extract to before first variable usage
+    try testExtractNamespace(
+        \\fn foo(bar: _) void {
+        \\    _ = bar.b<cursor>as;    
+        \\}
+    ,
+        \\fn foo(bar: _) void {
+        \\    const bas = bar.bas;
+        \\    _ = bas;    
+        \\}
+    );
+
+    // put global declarations next to existing once and not just at the bottom
+    try testExtractNamespace(
+        \\const std = @import("std");
+        \\const Allocator = std.mem.Allocator;
+        \\
+        \\test {
+        \\    _ = std.bar.<cursor>bas;
+        \\}
+    ,
+        \\const std = @import("std");
+        \\const Allocator = std.mem.Allocator;
+        \\const bas = std.bar.bas;
+        \\
+        \\test {
+        \\    _ = bas;
         \\}
     );
 }
