@@ -274,7 +274,21 @@ fn generateExtractNamespaceCodeAction(
 
         return;
     };
-    _ = first_part_type;
+
+    if (first_part_type == .regular) {
+        const document_scope = try builder.handle.getDocumentScope();
+
+        if (document_scope.getScopeDeclaration(.{
+            .scope = .root,
+            .kind = .other,
+            .name = tree.tokenSlice(extraction_token_first),
+        }).unwrap()) |index| {
+            _ = index;
+        } else {
+            // it means its local so we can't extract it to global scope
+            return;
+        }
+    }
 
     const insert_part = offsets.locToSlice(tree.source, .{
         .start = offsets.tokenToLoc(tree, extraction_token_first).start,

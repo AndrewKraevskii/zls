@@ -1041,6 +1041,39 @@ test "extract_namespace" {
         \\}
         \\const bas = std.bar.bas;
     );
+
+    try testExtractNamespace(
+        \\test {
+        \\    _ = @import("std").ba<cursor>s;
+        \\}
+    ,
+        \\test {
+        \\    _ = bas;
+        \\}
+        \\const bas = @import("std").bas;
+    );
+
+    try testExtractNamespace(
+        \\test {
+        \\    _ = @import("foo.zig").ba<cursor>s;
+        \\}
+    ,
+        \\test {
+        \\    _ = bas;
+        \\}
+        \\const bas = @import("foo.zig").bas;
+    );
+
+    try testExtractNamespace(
+        \\test {
+        \\    _ = @import("foo.zig").ba<cursor>s;
+        \\}
+    ,
+        \\test {
+        \\    _ = bas;
+        \\}
+        \\const bas = @import("foo.zig").bas;
+    );
 }
 
 test "extract_namespace multiple instances" {
@@ -1124,39 +1157,6 @@ test "extract_namespace string literals" {
         \\}
         \\const @"struct" = std.@"struct";
     );
-
-    try testExtractNamespace(
-        \\test {
-        \\    _ = @import("std").ba<cursor>s;
-        \\}
-    ,
-        \\test {
-        \\    _ = bas;
-        \\}
-        \\const bas = @import("std").bas;
-    );
-
-    try testExtractNamespace(
-        \\test {
-        \\    _ = @import("foo.zig").ba<cursor>s;
-        \\}
-    ,
-        \\test {
-        \\    _ = bas;
-        \\}
-        \\const bas = @import("foo.zig").bas;
-    );
-
-    try testExtractNamespace(
-        \\test {
-        \\    _ = @import("foo.zig").ba<cursor>s;
-        \\}
-    ,
-        \\test {
-        \\    _ = bas;
-        \\}
-        \\const bas = @import("foo.zig").bas;
-    );
 }
 
 test "extract_namespace intentionaly not supported" {
@@ -1170,6 +1170,37 @@ test "extract_namespace intentionaly not supported" {
         \\test {
         \\    _ = std.ArrayList(u8).bas;
         \\}
+    );
+}
+
+test "extract_namespace Local declaration" {
+    // should not do anything since its not implemented
+    try testExtractNamespace(
+        \\fn foo(bar: _) void {
+        \\    _ = bar.b<cursor>as;    
+        \\}
+    ,
+        \\fn foo(bar: _) void {
+        \\    _ = bar.bas;    
+        \\}
+    );
+
+    // this should not work
+    try testExtractNamespace(
+        \\const foo = struct {
+        \\    const bar = void;
+        \\    fn baz() void {
+        \\        _ = foo.b<cursor>ar;
+        \\    }
+        \\};
+    ,
+        \\const foo = struct {
+        \\    const bar = void;
+        \\    fn baz() void {
+        \\        _ = bar;
+        \\    }
+        \\};
+        \\const bar = foo.bar;
     );
 }
 
