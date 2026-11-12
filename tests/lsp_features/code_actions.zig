@@ -1124,6 +1124,39 @@ test "extract_namespace string literals" {
         \\}
         \\const @"struct" = std.@"struct";
     );
+
+    try testExtractNamespace(
+        \\test {
+        \\    _ = @import("std").ba<cursor>s;
+        \\}
+    ,
+        \\test {
+        \\    _ = bas;
+        \\}
+        \\const bas = @import("std").bas;
+    );
+
+    try testExtractNamespace(
+        \\test {
+        \\    _ = @import("foo.zig").ba<cursor>s;
+        \\}
+    ,
+        \\test {
+        \\    _ = bas;
+        \\}
+        \\const bas = @import("foo.zig").bas;
+    );
+
+    try testExtractNamespace(
+        \\test {
+        \\    _ = @import("foo.zig").ba<cursor>s;
+        \\}
+    ,
+        \\test {
+        \\    _ = bas;
+        \\}
+        \\const bas = @import("foo.zig").bas;
+    );
 }
 
 test "extract_namespace intentionaly not supported" {
@@ -1142,18 +1175,6 @@ test "extract_namespace intentionaly not supported" {
 
 test "extract_namespace not implemented for now" {
     if (true) return error.SkipZigTest;
-
-    // imports as root declaration should also work
-    try testExtractNamespace(
-        \\test {
-        \\    _ = @import("std").ba<cursor>s;
-        \\}
-    ,
-        \\const bas = @import("std").bas;
-        \\test {
-        \\    _ = bas;
-        \\}
-    );
 
     // for local variables it should extract to before first variable usage
     try testExtractNamespace(

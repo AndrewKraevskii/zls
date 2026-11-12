@@ -257,13 +257,24 @@ fn generateExtractNamespaceCodeAction(
     std.debug.assert(.period == tree.tokenTag(selected_token - 1));
 
     // const extraction_token_last = selected_token;
-    const extraction_token_first: Ast.TokenIndex = if (std.mem.findLastNone(Token.Tag, tree.tokens.items(.tag)[0 .. selected_token - 1], &.{ .period, .identifier })) |token_before_first_identifier|
+    const first_period_or_ident: Ast.TokenIndex = if (std.mem.findLastNone(Token.Tag, tree.tokens.items(.tag)[0 .. selected_token - 1], &.{ .period, .identifier })) |token_before_first_identifier|
         @intCast(token_before_first_identifier + 1)
     else
         0;
 
-    // this not supported for now. It would be situation similar to std.ArrayList(u32).Slice;
-    if (tree.tokenTag(extraction_token_first) != .identifier) return;
+    // fisrt token should be @<buildin_name>("string") or be identifier
+    const first_part_type: enum { regular, import }, const extraction_token_first = blk: {
+        if (tree.tokenTag(first_period_or_ident) == .identifier) break :blk .{ .regular, first_period_or_ident };
+
+        if (std.mem.endsWith(Token.Tag, tree.tokens.items(.tag)[0..first_period_or_ident], &.{ .builtin, .l_paren, .string_literal, .r_paren })) {
+            const buildin_index = first_period_or_ident - 4;
+            std.debug.assert(tree.tokenTag(buildin_index) == .builtin);
+            break :blk .{ .import, first_period_or_ident - 4 };
+        }
+
+        return;
+    };
+    _ = first_part_type;
 
     const insert_part = offsets.locToSlice(tree.source, .{
         .start = offsets.tokenToLoc(tree, extraction_token_first).start,
@@ -281,11 +292,11 @@ fn generateExtractNamespaceCodeAction(
         .end = last_token_locaction.end,
     };
 
-    const extraction_tags = tree.tokens.items(.tag)[extraction_token_first .. selected_token + 1];
     var edits: std.ArrayList(types.TextEdit) = .empty;
 
     var i: usize = 0;
     outer: while (i < tree.tokens.len) {
+        const extraction_tags = tree.tokens.items(.tag)[extraction_token_first .. selected_token + 1];
         const first_token: Ast.TokenIndex = @intCast(std.mem.findPos(
             Token.Tag,
             tree.tokens.items(.tag),
@@ -294,11 +305,11 @@ fn generateExtractNamespaceCodeAction(
         ) orelse break);
         i = first_token + extraction_tags.len;
 
-        // `first_token` should be first it access chain
-        if (std.mem.findScalar(Token.Tag, &.{
+        // `first_token` should be first in access chain
+        if (first_token > 0 and std.mem.findScalar(Token.Tag, &.{
             .identifier,
             .period,
-        }, tree.tokenTag(first_token -| 1)) != null) {
+        }, tree.tokenTag(first_token - 1)) != null) {
             continue;
         }
 
